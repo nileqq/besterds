@@ -107,7 +107,3 @@ class GetData:
             return submissions[-tail:]
         
         return submissions
-    
-cf = GetData("nileq")
-x = cf.get_submissions(head=10)
-print(cf.beautify(x, indent=4))
