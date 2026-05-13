@@ -107,3 +107,29 @@ class GetData:
             return submissions[-tail:]
         
         return submissions
+    
+    def get_skipped_count(self):
+        """
+        Returns skipped contests (where all submissions are skipped)
+        """
+
+        contests = self.get_contest_list()
+        skipped_contests = 0
+        for contest in contests:
+            submissions = self.get_contest_submissions(contest["contestId"])
+
+            contest_submissions = [
+                s for s in submissions
+                if s.get("author", {}).get("participantType") == "CONTESTANT"
+            ]
+
+            if not contest_submissions:
+                continue
+
+            if all(s.get("verdict") == "SKIPPED" for s in contest_submissions):
+                skipped_contests += 1
+        
+        return skipped_contests
+
+cf = GetData("Away_in_the_heavens")
+print(cf.get_skipped_count())
