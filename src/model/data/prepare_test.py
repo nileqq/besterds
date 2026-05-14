@@ -26,6 +26,8 @@ FEATURE_COLS = [
     "positive_residual_rms",
     "late_positive_residual_rms",
     "late_max_positive_residual",
+    "skipped_ratio",
+    "skipped_contests_count",
 ]
 
 
@@ -82,6 +84,15 @@ def extract_ema_features(deltas, period=5, skip_first=5):
     }
 
 
+def extract_skipped_contests_features(client: gd.GetData, contests: list) -> dict:
+    skipped_ones = client.get_skipped_count()
+
+    return {
+        "skipped_ratio": skipped_ones / len(contests),
+        "skipped_contests_count": skipped_ones,
+    }
+
+
 def get_rating_features(handle: str, period: int = 5):
     client = gd.GetData(handle)
     info_list = client.get_contest_list()
@@ -96,6 +107,7 @@ def get_rating_features(handle: str, period: int = 5):
     return {
         "handle": handle,
         **extract_ema_features(rating, period=period),
+        **extract_skipped_contests_features(client, info_list),
     }
 
 

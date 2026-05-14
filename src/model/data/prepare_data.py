@@ -19,6 +19,9 @@ trusted = [
 ]
 
 def calculate_ema(values, period=5):
+    """
+    Calculates EMA - Exponent Moving Average
+    """
     values = np.array(values, dtype=float)
 
     if len(values) == 0:
@@ -35,6 +38,9 @@ def calculate_ema(values, period=5):
     return result
 
 def extract_ema_features(deltas, period=5, skip_first=5):
+    """
+    Calculates EMA of the last 5 contests
+    """
     arr = np.array(deltas, dtype=float)
 
     if len(arr) == 0:
@@ -69,6 +75,19 @@ def extract_ema_features(deltas, period=5, skip_first=5):
         "late_max_positive_residual": float(np.max(late_positive_residuals)) if len(late_positive_residuals) else 0.0,
     }
 
+def extract_skipped_contests_features(client: gd.GetData) -> dict:
+    """
+    Counts rated contests and returns ratio: skipped / all
+    """
+
+    contests = client.get_contest_list()
+    skipped_ones = client.get_skipped_count()
+
+    return {
+        "skipped_ratio": skipped_ones / len(contests),
+        "skipped_contests_count": skipped_ones
+    }
+
 def _get_rating_row(client: gd.GetData, is_cheater: bool, period: int = 5) -> dict:
     try:
         info_list = client.get_contest_list()
@@ -77,15 +96,16 @@ def _get_rating_row(client: gd.GetData, is_cheater: bool, period: int = 5) -> di
             raise Exception("")
 
         rating = []
-        ema = 0
         for i in range(len(info_list)):
             rating.append(info_list[i]['newRating'] - info_list[i]['oldRating'])
 
-        features = extract_ema_features(rating, period=period)
+        features_1 = extract_ema_features(rating, period=period)
+        features_2 = extract_skipped_contests_features(client=client)
         
         return {
             "handle": client.handle, 
-            **features,
+            **features_1,
+            **features_2,
             "is_cheater": is_cheater
         }
     except Exception as e:

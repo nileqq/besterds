@@ -41,6 +41,8 @@ class Model:
             "positive_residual_rms",
             "late_positive_residual_rms",
             "late_max_positive_residual",
+            "skipped_ratio",
+            "skipped_contests_count",
         ]
 
         X = df[feature_cols].values.astype(float)

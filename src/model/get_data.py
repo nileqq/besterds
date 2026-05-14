@@ -130,6 +130,3 @@ class GetData:
                 skipped_contests += 1
         
         return skipped_contests
-
-cf = GetData("Away_in_the_heavens")
-print(cf.get_skipped_count())
