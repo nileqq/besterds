@@ -87,7 +87,7 @@ def extract_skipped_contests_features(client: gd.GetData, contests: list) -> dic
         "skipped_contests_count": skipped_ones
     }
 
-def get_expected_place(contests: list, period=5, window_size=5, skip_first=5) -> float:
+def get_expected_place(contests: list, period=5, window_size=8, skip_first=5) -> float:
     """
     Returns the strongest place-surprise window.
     Higher value means the user had a short suspicious streak of unusually good ranks.
