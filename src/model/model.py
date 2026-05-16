@@ -2,6 +2,32 @@ import numpy as np
 import pandas as pd
 
 
+FEATURE_COLS = [
+    "contest_count",
+    "ema_last",
+    "ema_slope_last_5",
+    "positive_residual_rms",
+    "late_positive_residual_rms",
+    "late_max_positive_residual",
+    "max_place_surprise_window_rms",
+    "skipped_ratio",
+    "skipped_contests_count",
+]
+
+
+def prepare_training_frame(df):
+    df = df.dropna().copy()
+
+    if "max_place_surprise_window_rms" not in df.columns and "expected_place_surprise_rms" in df.columns:
+        df["max_place_surprise_window_rms"] = df["expected_place_surprise_rms"]
+
+    for col in FEATURE_COLS:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    return df
+
+
 class Model:
     def __init__(self, lr=0.01):
         self.lr = lr
@@ -28,42 +54,29 @@ class Model:
 
         return grad
 
-    def train(self, csv_path="cheating_dataset.csv", seed=0, epochs=500, batch_size=5):
+    def train(self, csv_path="cheating_dataset.csv", seed=0, epochs=2000, batch_size=5, verbose=True):
+        df = pd.read_csv(csv_path)
+        return self.train_df(df, seed=seed, epochs=epochs, batch_size=batch_size, verbose=verbose)
+
+    def train_df(self, df, seed=0, epochs=2000, batch_size=5, verbose=True):
         np.random.seed(seed)
 
-        df = pd.read_csv(csv_path)
-        df = df.dropna()
+        df = prepare_training_frame(df)
+        X = df[FEATURE_COLS].values.astype(float)
 
-        feature_cols = [
-            "contest_count",
-            "ema_last",
-            "ema_slope_last_5",
-            "positive_residual_rms",
-            "late_positive_residual_rms",
-            "late_max_positive_residual",
-            "skipped_ratio",
-            "skipped_contests_count",
-        ]
-
-        X = df[feature_cols].values.astype(float)
-
-        # было True/False или 0/1
         y = df["is_cheater"].astype(int).values
-
-        # переводим 0/1 в -1/+1
         y = np.where(y == 1, 1, -1)
 
         self.mean = X.mean(axis=0)
         self.std = X.std(axis=0) + 1e-8
         X = self.normalize(X)
 
-        # bias в конец
         X = np.c_[X, np.ones((X.shape[0], 1))]
 
         n_samples, n_features = X.shape
 
-        # n_features уже включает bias
         self.w = np.zeros((n_features, 1))
+        batch_size = min(batch_size, n_samples)
 
         for epoch in range(epochs):
             k = np.random.randint(0, n_samples - batch_size + 1)
@@ -77,7 +90,7 @@ class Model:
 
             self.w -= self.lr * grad
 
-            if epoch % 100 == 0:
+            if verbose and epoch % 100 == 0:
                 print(f"epoch={epoch}, loss={self.loss(X, y):.4f}")
 
         return self
@@ -101,5 +114,6 @@ class Model:
     def print_w(self):
         return self.w
 
-x = Model().train()
-print(x.print_w())
+if __name__ == "__main__":
+    x = Model().train()
+    print(x.print_w())

@@ -75,18 +75,58 @@ def extract_ema_features(deltas, period=5, skip_first=5):
         "late_max_positive_residual": float(np.max(late_positive_residuals)) if len(late_positive_residuals) else 0.0,
     }
 
-def extract_skipped_contests_features(client: gd.GetData) -> dict:
+def extract_skipped_contests_features(client: gd.GetData, contests: list) -> dict:
     """
     Counts rated contests and returns ratio: skipped / all
     """
 
-    contests = client.get_contest_list()
-    skipped_ones = client.get_skipped_count()
+    skipped_ones = client.get_skipped_count(contests=contests)
 
     return {
         "skipped_ratio": skipped_ones / len(contests),
         "skipped_contests_count": skipped_ones
     }
+
+def get_expected_place(contests: list, period=5, window_size=5, skip_first=5) -> float:
+    """
+    Returns the strongest place-surprise window.
+    Higher value means the user had a short suspicious streak of unusually good ranks.
+    """
+
+    if window_size <= 0:
+        raise ValueError("window_size must be > 0")
+
+    ranks = [
+        contest["rank"]
+        for contest in contests
+        if contest.get("rank", 0) > 0
+    ]
+
+    if len(ranks) <= 1:
+        return 0.0
+
+    log_ranks = np.log1p(np.array(ranks, dtype=float))
+    expected_log_ranks = calculate_ema(log_ranks, period=period)
+
+    surprises = np.zeros(len(log_ranks))
+    for i in range(1, len(log_ranks)):
+        surprises[i] = max(0.0, expected_log_ranks[i - 1] - log_ranks[i])
+
+    surprises = surprises[skip_first:]
+
+    if len(surprises) == 0:
+        return 0.0
+
+    if len(surprises) < window_size:
+        return float(np.sqrt(np.mean(surprises ** 2)))
+
+    best_window_score = 0.0
+    for start in range(len(surprises) - window_size + 1):
+        window = surprises[start:start + window_size]
+        window_score = float(np.sqrt(np.mean(window ** 2)))
+        best_window_score = max(best_window_score, window_score)
+
+    return best_window_score
 
 def _get_rating_row(client: gd.GetData, is_cheater: bool, period: int = 5) -> dict:
     try:
@@ -100,18 +140,18 @@ def _get_rating_row(client: gd.GetData, is_cheater: bool, period: int = 5) -> di
             rating.append(info_list[i]['newRating'] - info_list[i]['oldRating'])
 
         features_1 = extract_ema_features(rating, period=period)
-        features_2 = extract_skipped_contests_features(client=client)
+        features_2 = extract_skipped_contests_features(client=client, contests=info_list)
         
         return {
             "handle": client.handle, 
             **features_1,
+            "max_place_surprise_window_rms": get_expected_place(info_list, period=period),
             **features_2,
             "is_cheater": is_cheater
         }
     except Exception as e:
         print(f"Error upon request {client.handle}: {e}")
         return None
-
 dataset_rows = []
 
 for handle in cheaters:
