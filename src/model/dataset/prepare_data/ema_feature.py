@@ -3,24 +3,13 @@ import numpy as np
 import pandas as pd
 
 class EMAFeature:
-
-    def __init__(self, handle: str):
-        """
-        Initialises EMAFeature class that returns EMA of the contests
-
-        Parameters:
-          - handle: handle of the user.
-
-        Notes:
-          - self.gd: creates an object of the class GetData to have an access to methods of the class
-        """
-
-        self.handle = handle
-        self.gd = GetData(handle)
-
     def calculate_ema(self, values, period=5):
         """
         Calculates EMA - exponent moving average of the user's contests.
+
+        Args:
+          - values: Sequence of numerical values, for example rating deltas.
+          - period: EMA smoothing period. Smaller period reacts faster to recent changes.
 
         Returns:
           - result: returns EMA for every contest
@@ -46,6 +35,22 @@ class EMAFeature:
     def extract(self, deltas, period=5, skip_first=5):
         """
         Extracts and returns EMA - exponent moving average of the user's contests.
+
+        Args:
+          - deltas: sequence of numerical values: rating deltas
+          - period: EMA smoothing period.
+          - skip_first: ignores first 5 contests. Used to avoid marking newbies as "cheaters", because before stabillization Codeforces gives them many rating.
+
+        Returns:
+          - features: {
+            - contest_count: number of the contests of the user,
+            - ema_last: current trend of the EMA
+            - ema_slope_last_5: EMA changes for the last 5 contests
+            - residuals: expectations
+            - positive_residual_rms: RMS for positive residuals. Shows how "stronger" is residuals really are.
+            - late_positive_residual_rms: RMS for positive residuals but ignoring first 'skip_first' contests.
+            - late_max_positive_residual: the biggest residual among all contests ignoring 'skip_first' contests.
+          }
         """
 
         arr = np.array(deltas, dtype=float)
@@ -81,6 +86,5 @@ class EMAFeature:
             "late_positive_residual_rms": float(np.sqrt(np.mean(late_positive_residuals ** 2))) if len(late_positive_residuals) else 0.0,
             "late_max_positive_residual": float(np.max(late_positive_residuals)) if len(late_positive_residuals) else 0.0,
         }
-
 
 

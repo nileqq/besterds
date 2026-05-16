@@ -1,8 +1,23 @@
-import pandas as pd
-import time
-from src.model import get_data as gd
-import numpy as np
 import argparse
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from src.model import get_data as gd
+from src.model.model import FEATURE_COLS
+from src.model.model import Model
+from src.model.model import prepare_training_frame
+from src.model.dataset.prepare_data.ema_feature import EMAFeature
+from src.model.dataset.prepare_data.skipped_feature import SkippedFeature
+
+
+FEATURE_DIR = Path(__file__).with_name("prepare_data")
+if str(FEATURE_DIR) not in sys.path:
+    sys.path.insert(0, str(FEATURE_DIR))
+
 
 cheaters = [
     "born_to_play", "bow_before_your_king", "bricked_", "bro_gona_rock",
@@ -17,145 +32,32 @@ trusted = [
     "autaons"
 ]
 
-FEATURE_COLS = [
-    "contest_count",
-    "ema_last",
-    "ema_slope_last_5",
-    "positive_residual_rms",
-    "late_positive_residual_rms",
-    "late_max_positive_residual",
-    "max_place_surprise_window_rms",
-    "skipped_ratio",
-    "skipped_contests_count",
-]
-
-
-def calculate_ema(values, period=5):
-    values = np.array(values, dtype=float)
-
-    if len(values) == 0:
-        return np.array([])
-
-    alpha = 2 / (period + 1)
-
-    result = np.zeros(len(values))
-    result[0] = values[0]
-
-    for i in range(1, len(values)):
-        result[i] = alpha * values[i] + (1 - alpha) * result[i - 1]
-
-    return result
-
-
-def extract_ema_features(deltas, period=5, skip_first=5):
-    arr = np.array(deltas, dtype=float)
-
-    if len(arr) == 0:
-        return {
-            "contest_count": 0.0,
-            "ema_last": 0.0,
-            "ema_slope_last_5": 0.0,
-            "positive_residual_rms": 0.0,
-            "late_positive_residual_rms": 0.0,
-            "late_max_positive_residual": 0.0,
-        }
-
-    ema = calculate_ema(arr, period=period)
-
-    residuals = np.zeros(len(arr))
-    residuals[0] = 0.0
-
-    for i in range(1, len(arr)):
-        residuals[i] = arr[i] - ema[i - 1]
-
-    positive_residuals = residuals[residuals > 0]
-
-    late_residuals = residuals[skip_first:]
-    late_positive_residuals = late_residuals[late_residuals > 0]
-
-    return {
-        "contest_count": len(arr),
-        "ema_last": float(ema[-1]),
-        "ema_slope_last_5": float(ema[-1] - ema[-5]) if len(ema) >= 5 else float(ema[-1] - ema[0]),
-        "positive_residual_rms": float(np.sqrt(np.mean(positive_residuals ** 2))) if len(positive_residuals) else 0.0,
-        "late_positive_residual_rms": float(np.sqrt(np.mean(late_positive_residuals ** 2))) if len(late_positive_residuals) else 0.0,
-        "late_max_positive_residual": float(np.max(late_positive_residuals)) if len(late_positive_residuals) else 0.0,
-    }
-
-
-def extract_skipped_contests_features(client: gd.GetData, contests: list) -> dict:
-    skipped_ones = client.get_skipped_count(contests=contests)
-
-    return {
-        "skipped_ratio": skipped_ones / len(contests),
-        "skipped_contests_count": skipped_ones,
-    }
-
-
-def get_expected_place(contests: list, period=5, window_size=5, skip_first=5) -> float:
-    """
-    Returns the strongest place-surprise window.
-    Higher value means the user had a short suspicious streak of unusually good ranks.
-    """
-
-    if window_size <= 0:
-        raise ValueError("window_size must be > 0")
-
-    ranks = [
-        contest["rank"]
-        for contest in contests
-        if contest.get("rank", 0) > 0
-    ]
-
-    if len(ranks) <= 1:
-        return 0.0
-
-    log_ranks = np.log1p(np.array(ranks, dtype=float))
-    expected_log_ranks = calculate_ema(log_ranks, period=period)
-
-    surprises = np.zeros(len(log_ranks))
-    for i in range(1, len(log_ranks)):
-        surprises[i] = max(0.0, expected_log_ranks[i - 1] - log_ranks[i])
-
-    surprises = surprises[skip_first:]
-
-    if len(surprises) == 0:
-        return 0.0
-
-    if len(surprises) < window_size:
-        return float(np.sqrt(np.mean(surprises ** 2)))
-
-    best_window_score = 0.0
-    for start in range(len(surprises) - window_size + 1):
-        window = surprises[start:start + window_size]
-        window_score = float(np.sqrt(np.mean(window ** 2)))
-        best_window_score = max(best_window_score, window_score)
-
-    return best_window_score
-
 
 def get_rating_features(handle: str, period: int = 5):
     client = gd.GetData(handle)
-    info_list = client.get_contest_list()
+    contests = client.get_contest_list()
 
-    if len(info_list) < 3:
+    if len(contests) < 3:
         raise ValueError("Not enough rated contests to make prediction")
 
-    rating = []
-    for contest in info_list:
-        rating.append(contest["newRating"] - contest["oldRating"])
+    rating_deltas = [
+        contest["newRating"] - contest["oldRating"]
+        for contest in contests
+    ]
 
     return {
         "handle": handle,
-        **extract_ema_features(rating, period=period),
-        "max_place_surprise_window_rms": get_expected_place(info_list, period=period),
-        **extract_skipped_contests_features(client, info_list),
+        **EMAFeature().extract(rating_deltas, period=period),
+        "max_place_surprise_window_rms": SkippedFeature.get_expected_place(
+            contests,
+            period=period,
+            window_size=5,
+        ),
+        **SkippedFeature.extract_skipped_contests_features(client, contests),
     }
 
 
 def load_model():
-    from src.model.model import Model
-
     return Model().train(verbose=False)
 
 
@@ -225,10 +127,6 @@ def make_stratified_folds(labels, k=5, seed=0):
 
 
 def evaluate_kfold(csv_path="cheating_dataset.csv", k=5, seed=0):
-    from src.model.model import FEATURE_COLS as MODEL_FEATURE_COLS
-    from src.model.model import Model
-    from src.model.model import prepare_training_frame
-
     df = pd.read_csv(csv_path)
     df = prepare_training_frame(df)
     labels = df["is_cheater"].astype(int).values
@@ -249,31 +147,27 @@ def evaluate_kfold(csv_path="cheating_dataset.csv", k=5, seed=0):
 
         fold_results = []
         for _, row in test_df.iterrows():
-            x = [row[col] for col in MODEL_FEATURE_COLS]
-            score = model.predict_score(x)
-            prediction = model.predict(x)
+            score, prediction = predict_row(model, row)
             result = {
+                "fold": fold_number,
                 "handle": row.get("handle", ""),
                 "expected": int(row["is_cheater"]),
                 "prediction": prediction,
                 "score": score,
                 "correct": int(prediction == int(row["is_cheater"])),
-                "fold": fold_number,
             }
             fold_results.append(result)
             all_results.append(result)
 
-        fold_metrics = calculate_binary_metrics(fold_results)
         fold_rows.append({
             "fold": fold_number,
             "size": len(fold_results),
-            **fold_metrics,
+            **calculate_binary_metrics(fold_results),
         })
-
-    metrics = calculate_binary_metrics(all_results)
 
     fold_df = pd.DataFrame(fold_rows)
     result_df = pd.DataFrame(all_results)
+    metrics = calculate_binary_metrics(all_results)
 
     print(fold_df[["fold", "size", "accuracy", "precision", "recall", "f1", "tp", "fp", "tn", "fn"]].to_string(index=False))
     print()
