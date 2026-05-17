@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Besterds",
+  "description": "Pure Codeforces leaderboard without suspicious users.",
+  "version": "0.1.0",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://codeforces.com/*",
+    "https://*.codeforces.com/*",
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://codeforces.com/contest/*/standings*",
+        "https://*.codeforces.com/contest/*/standings*",
+        "https://codeforces.com/gym/*/standings*",
+        "https://*.codeforces.com/gym/*/standings*",
+        "https://codeforces.com/group/*/contest/*/standings*",
+        "https://*.codeforces.com/group/*/contest/*/standings*"
+      ],
+      "css": ["styles/content.css"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_title": "Besterds",
+    "default_popup": "popup/popup.html"
+  }
+}

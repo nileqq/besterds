@@ -1,6 +1,6 @@
 from src.model.get_data import GetData
 import numpy as np
-from ema_feature import EMAFeature
+from src.model.dataset.prepare_data.ema_feature import EMAFeature
 
 class SkippedFeature:
     def get_expected_place(contests: list, period=5, window_size=8, skip_first=5):

@@ -23,7 +23,8 @@ cheaters = [
     "born_to_play", "bow_before_your_king", "bricked_", "bro_gona_rock",
     "bromate04", "bshah", "chatgpt_llm", "chiffin", "deeppaws",
     "12345vai", "2740", "504timeout", "darkhome", "darkstreak", 
-    "darkpast", "darshan23100", "gagansharma001"
+    "darkpast", "darshan23100", "gagansharma001", 
+    "MostafabinMohamed"
 ]
 
 trusted = [

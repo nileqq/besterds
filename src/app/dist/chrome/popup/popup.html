@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Besterds</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="popup-header">
+        <h1>Besterds</h1>
+        <p>Pure Codeforces leaderboard</p>
+      </header>
+
+      <label class="switch-row">
+        <span>Enabled</span>
+        <input id="enabledInput" type="checkbox">
+      </label>
+
+      <section class="mode-section">
+        <span class="section-label">Mode</span>
+        <div class="segmented">
+          <button id="hideModeButton" type="button">Hide</button>
+          <button id="highlightModeButton" type="button">Highlight</button>
+        </div>
+      </section>
+
+      <section class="backend-card">
+        <span class="section-label">Model backend</span>
+        <p id="backendStatusText">Checking...</p>
+      </section>
+
+      <div class="actions">
+        <button id="saveButton" type="button">Save</button>
+      </div>
+
+      <p id="statusText" class="status"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,119 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: #f6f7f9;
+  color: #111827;
+  font-family: Arial, sans-serif;
+  margin: 0;
+  min-width: 320px;
+}
+
+.popup {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.popup-header h1 {
+  font-size: 18px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.popup-header p {
+  color: #6b7280;
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.switch-row {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  padding: 10px;
+}
+
+.mode-section,
+.backend-card {
+  display: grid;
+  gap: 7px;
+}
+
+.section-label {
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.segmented {
+  background: #e5e7eb;
+  border-radius: 6px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+}
+
+.segmented button {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: #374151;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 8px;
+}
+
+.segmented button[data-active="true"] {
+  background: #ffffff;
+  color: #111827;
+  font-weight: 700;
+}
+
+.backend-card {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.backend-card p {
+  color: #9a3412;
+  font-size: 12px;
+  margin: 0;
+}
+
+.backend-card p[data-online="true"] {
+  color: #166534;
+}
+
+.actions {
+  display: grid;
+}
+
+.actions button {
+  border: 1px solid #b8c0cc;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 8px;
+}
+
+#saveButton {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #ffffff;
+}
+
+.status {
+  color: #166534;
+  font-size: 12px;
+  margin: 0;
+  min-height: 14px;
+}

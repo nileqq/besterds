@@ -12,10 +12,8 @@ FEATURE_DIR = Path(__file__).with_suffix("")
 if str(FEATURE_DIR) not in sys.path:
     sys.path.insert(0, str(FEATURE_DIR))
 
-
-
 # Prepares data for .csv file
-# Launch it using: python -m src.model.data.prepare_data command;
+# Launch it using: python -m src.model.dataset.data command;
 
 cheaters = [
     "--dark--", "-0.50", "777dimasik777", 
