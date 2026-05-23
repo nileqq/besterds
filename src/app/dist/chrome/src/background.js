@@ -1,9 +1,16 @@
 const BACKEND_BASE_URL = "http://127.0.0.1:8765";
 const CACHE_VERSION = "model-v1";
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const CACHE_STORAGE_KEY = `besterds:${CACHE_VERSION}:predictionDict`;
+const BACKEND_REQUEST_DELAY_MS = 2000;
+const FAILED_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const memoryCache = new Map();
 const pendingRequests = new Map();
+let cacheLoaded = false;
+let cacheLoadPromise = null;
+let cacheSaveQueue = Promise.resolve();
+let nextBackendRequestAt = 0;
+let backendRequestQueue = Promise.resolve();
 
 /**
  * Описание:
@@ -21,6 +28,66 @@ function normalizeHandle(handle) {
 
 /**
  * Описание:
+ * Ждет указанное количество миллисекунд.
+ *
+ * Параметры:
+ * - delayMs: время ожидания в миллисекундах.
+ *
+ * Возвращает:
+ * - Promise<void>: завершение ожидания.
+ */
+function sleep(delayMs) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+/**
+ * Описание:
+ * Ограничивает частоту запросов к локальному backend.
+ *
+ * Параметры:
+ * - нет.
+ *
+ * Возвращает:
+ * - Promise<void>: момент, когда можно отправлять следующий request.
+ */
+async function waitBackendRequestSlot() {
+  const waitMs = Math.max(0, nextBackendRequestAt - Date.now());
+
+  if (waitMs > 0) {
+    await sleep(waitMs);
+  }
+}
+
+/**
+ * Описание:
+ * Запускает backend request через общую очередь.
+ *
+ * Параметры:
+ * - request: функция, которая отправляет один backend request.
+ *
+ * Возвращает:
+ * - Promise<object>: результат backend request.
+ */
+function runBackendRequest(request) {
+  const queuedRequest = backendRequestQueue.then(async () => {
+    await waitBackendRequestSlot();
+
+    try {
+      return await request();
+    } finally {
+      nextBackendRequestAt = Date.now() + BACKEND_REQUEST_DELAY_MS;
+    }
+  });
+
+  backendRequestQueue = queuedRequest.catch(() => {});
+
+  return queuedRequest;
+}
+
+/**
+ * Описание:
  * Создает ключ cache для конкретной версии модели и handle.
  *
  * Параметры:
@@ -30,7 +97,7 @@ function normalizeHandle(handle) {
  * - string: ключ для chrome.storage.local.
  */
 function getCacheKey(handle) {
-  return `besterds:${CACHE_VERSION}:${normalizeHandle(handle)}`;
+  return normalizeHandle(handle);
 }
 
 /**
@@ -79,7 +146,79 @@ function storageSet(key, value) {
  * - boolean: true, если cache еще актуален.
  */
 function isFreshCache(cached) {
-  return Boolean(cached && Date.now() - cached.savedAt < CACHE_TTL_MS);
+  if (!cached || !cached.payload) {
+    return false;
+  }
+
+  if (cached.payload.ok) {
+    return true;
+  }
+
+  return Date.now() - Number(cached.savedAt || 0) < FAILED_CACHE_TTL_MS;
+}
+
+function normalizeCacheEntry(entry) {
+  if (!isFreshCache(entry)) {
+    return null;
+  }
+
+  return {
+    savedAt: Number(entry.savedAt) || Date.now(),
+    payload: entry.payload,
+  };
+}
+
+async function loadPredictionDict() {
+  if (cacheLoaded) {
+    return;
+  }
+
+  if (!cacheLoadPromise) {
+    cacheLoadPromise = storageGet(CACHE_STORAGE_KEY)
+      .then((stored) => {
+        const users = stored?.version === CACHE_VERSION ? stored.users : null;
+
+        if (users && typeof users === "object") {
+          Object.entries(users).forEach(([handle, entry]) => {
+            const key = normalizeHandle(handle);
+            const normalizedEntry = normalizeCacheEntry(entry);
+
+            if (key && normalizedEntry) {
+              memoryCache.set(key, normalizedEntry);
+            }
+          });
+        }
+
+        cacheLoaded = true;
+      })
+      .catch(() => {
+        cacheLoaded = true;
+      });
+  }
+
+  await cacheLoadPromise;
+}
+
+function buildPredictionDictSnapshot() {
+  const users = {};
+
+  memoryCache.forEach((entry, handle) => {
+    users[handle] = entry;
+  });
+
+  return {
+    version: CACHE_VERSION,
+    savedAt: Date.now(),
+    users,
+  };
+}
+
+function savePredictionDict() {
+  cacheSaveQueue = cacheSaveQueue
+    .then(() => storageSet(CACHE_STORAGE_KEY, buildPredictionDictSnapshot()))
+    .catch(() => {});
+
+  return cacheSaveQueue;
 }
 
 /**
@@ -93,18 +232,15 @@ function isFreshCache(cached) {
  * - Promise<object | null>: prediction из cache или null.
  */
 async function readCachedPrediction(handle) {
-  const key = getCacheKey(handle);
-  const memoryValue = memoryCache.get(key);
+  await loadPredictionDict();
 
-  if (isFreshCache(memoryValue)) {
-    return { ...memoryValue.payload, cache: "memory" };
-  }
+  const cached = memoryCache.get(getCacheKey(handle));
 
-  const storedValue = await storageGet(key);
-
-  if (isFreshCache(storedValue)) {
-    memoryCache.set(key, storedValue);
-    return { ...storedValue.payload, cache: "storage" };
+  if (isFreshCache(cached)) {
+    return {
+      ...cached.payload,
+      cache: cached.payload.ok ? "dict" : "error-dict",
+    };
   }
 
   return null;
@@ -122,18 +258,25 @@ async function readCachedPrediction(handle) {
  * - Promise<void>: завершение записи cache.
  */
 async function writeCachedPrediction(handle, payload) {
-  if (!payload || !payload.ok) {
+  if (!payload) {
     return;
   }
 
+  await loadPredictionDict();
+
   const key = getCacheKey(handle);
+
+  if (!key) {
+    return;
+  }
+
   const value = {
     savedAt: Date.now(),
     payload,
   };
 
   memoryCache.set(key, value);
-  await storageSet(key, value);
+  await savePredictionDict();
 }
 
 /**
@@ -150,18 +293,20 @@ async function fetchPrediction(handle) {
   const url = new URL("/predict", BACKEND_BASE_URL);
   url.searchParams.set("handle", handle);
 
-  const response = await fetch(url);
-  const payload = await response.json().catch(() => ({}));
+  return runBackendRequest(async () => {
+    const response = await fetch(url);
+    const payload = await response.json().catch(() => ({}));
 
-  if (!response.ok || !payload.ok) {
-    return {
-      ok: false,
-      handle,
-      error: payload.error || `Model API error ${response.status}`,
-    };
-  }
+    if (!response.ok || !payload.ok) {
+      return {
+        ok: false,
+        handle,
+        error: payload.error || `Model API error ${response.status}`,
+      };
+    }
 
-  return { ...payload, cache: "backend" };
+    return { ...payload, cache: payload.cache || "backend" };
+  });
 }
 
 /**
@@ -188,6 +333,16 @@ async function getPrediction(handle) {
 
   const request = fetchPrediction(handle)
     .then(async (payload) => {
+      await writeCachedPrediction(handle, payload);
+      return payload;
+    })
+    .catch(async (error) => {
+      const payload = {
+        ok: false,
+        handle,
+        error: error.message,
+      };
+
       await writeCachedPrediction(handle, payload);
       return payload;
     })

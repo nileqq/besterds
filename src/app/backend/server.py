@@ -16,13 +16,64 @@ from src.model.model import Model
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DATASET_PATH = ROOT_DIR / "cheating_dataset.csv"
+CACHE_VERSION = "model-v1"
+PREDICTION_CACHE_PATH = ROOT_DIR / "src" / "app" / "backend" / "prediction_cache.json"
 
 _model = None
 _model_lock = Lock()
-_prediction_cache = {}
 _prediction_cache_lock = Lock()
 _handle_locks = {}
 _handle_locks_lock = Lock()
+
+
+def load_prediction_cache():
+    """
+    Load the persistent handle -> prediction dictionary from disk.
+    """
+
+    if not PREDICTION_CACHE_PATH.exists():
+        return {}
+
+    try:
+        payload = json.loads(PREDICTION_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if payload.get("version") != CACHE_VERSION:
+        return {}
+
+    predictions = payload.get("predictions")
+
+    if not isinstance(predictions, dict):
+        return {}
+
+    return {
+        str(handle).strip().lower(): prediction
+        for handle, prediction in predictions.items()
+        if isinstance(prediction, dict) and str(handle).strip()
+    }
+
+
+def save_prediction_cache(cache):
+    """
+    Persist the full handle -> prediction dictionary as JSON.
+    """
+
+    PREDICTION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = PREDICTION_CACHE_PATH.with_suffix(".json.tmp")
+    payload = {
+        "version": CACHE_VERSION,
+        "predictions": cache,
+    }
+
+    temporary_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    temporary_path.replace(PREDICTION_CACHE_PATH)
+
+
+_prediction_cache = load_prediction_cache()
 
 
 def get_model():
@@ -105,7 +156,7 @@ def build_prediction(handle):
         cached = _prediction_cache.get(cache_key)
 
     if cached is not None:
-        return cached
+        return {**cached, "cache": "file"}
 
     handle_lock = get_handle_lock(cache_key)
 
@@ -114,27 +165,48 @@ def build_prediction(handle):
             cached = _prediction_cache.get(cache_key)
 
         if cached is not None:
-            return cached
+            return {**cached, "cache": "file"}
 
-        model = get_model()
-        row = get_rating_features(normalized_handle)
-        score, prediction = predict_row(model, row)
+        try:
+            row = get_rating_features(normalized_handle)
+        except ValueError as error:
+            if str(error) != "Not enough rated contests to make prediction":
+                raise
 
-        result = {
-            "handle": normalized_handle,
-            "score": float(score),
-            "prediction": int(prediction),
-            "label": "suspicious" if int(prediction) == 1 else "clean",
-            "features": {
-                column: to_json_value(row.get(column, 0.0))
-                for column in FEATURE_COLS
-            },
-        }
+            result = {
+                "handle": normalized_handle,
+                "score": 0.0,
+                "prediction": 0,
+                "label": "unknown",
+                "error": str(error),
+                "features": {
+                    column: 0.0
+                    for column in FEATURE_COLS
+                },
+            }
+        else:
+            model = get_model()
+            score, prediction = predict_row(model, row)
+
+            result = {
+                "handle": normalized_handle,
+                "score": float(score),
+                "prediction": int(prediction),
+                "label": "suspicious" if int(prediction) == 1 else "clean",
+                "features": {
+                    column: to_json_value(row.get(column, 0.0))
+                    for column in FEATURE_COLS
+                },
+            }
 
         with _prediction_cache_lock:
             _prediction_cache[cache_key] = result
+            try:
+                save_prediction_cache(_prediction_cache)
+            except OSError:
+                pass
 
-    return result
+    return {**result, "cache": "computed"}
 
 
 class BesterdsHandler(BaseHTTPRequestHandler):

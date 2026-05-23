@@ -69,6 +69,12 @@
   white-space: nowrap;
 }
 
+.besterds-owner-rank {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #166534;
+}
+
 .besterds-mark {
   background: #ffe4e6;
   border: 1px solid #fda4af;

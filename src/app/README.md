@@ -49,6 +49,7 @@ python -m src.app.backend.server
 
 - Adds a Besterds panel above standings.
 - Builds a pure leaderboard by asking the local Python model API for each visible handle.
-- Shows `pure #N` ranks for clean rows.
+- Shows your real place without suspicious users and `pure #N` ranks for clean rows.
 - Supports hide and highlight modes.
 - Uses the existing `src.model.model.Model` implementation instead of reimplementing the model in JavaScript.
+- Caches predictions in one extension dictionary and in `src/app/backend/prediction_cache.json` so handles are not recomputed after reloads or backend restarts.

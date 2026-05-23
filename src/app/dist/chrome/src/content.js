@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const predictionCache = new Map();
+let applyBesterdsPromise = null;
 
 /**
  * Описание:
@@ -72,6 +73,34 @@ function normalizeHandle(handle) {
 
 /**
  * Описание:
+ * Достает handle владельца текущей Codeforces-сессии.
+ *
+ * Параметры:
+ * - нет.
+ *
+ * Возвращает:
+ * - string | null: handle владельца или null.
+ */
+function getOwnerHandle() {
+  const ownerSelectors = [
+    ".userbox a[href*=\"/profile/\"]",
+    ".enter-or-register-box a[href*=\"/profile/\"]",
+  ];
+
+  for (const selector of ownerSelectors) {
+    const link = document.querySelector(selector);
+    const handle = link ? getHandleFromHref(link.href) : null;
+
+    if (handle) {
+      return handle;
+    }
+  }
+
+  return new URLSearchParams(window.location.search).get("handle");
+}
+
+/**
+ * Описание:
  * Запрашивает предсказание для handle у локального Python backend.
  *
  * Параметры:
@@ -103,7 +132,6 @@ async function fetchPrediction(handle) {
       return payload;
     })
     .catch((error) => {
-      predictionCache.delete(normalized);
       throw error;
     });
 
@@ -150,15 +178,41 @@ async function mapLimit(items, limit, mapper) {
  *
  * Параметры:
  * - row: HTML-строка standings.
+ * - ownerHandle: handle владельца аккаунта, которого нельзя скрывать.
  *
  * Возвращает:
  * - Promise<object>: флаг подозрительности, лучший score и ошибка, если backend недоступен.
  */
-async function getRowPrediction(row) {
+async function getRowPrediction(row, ownerHandle) {
   const handles = getRowHandles(row);
 
   if (!handles.length) {
     return { isSuspicious: false, score: null, error: null };
+  }
+
+  const isOwner = isOwnerRow(row, ownerHandle);
+
+  if (isOwner) {
+    const settledPredictions = await Promise.allSettled(handles.map(fetchPrediction));
+    const predictions = settledPredictions
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+
+    if (!predictions.length) {
+      return { isSuspicious: false, score: null, error: null, isOwner };
+    }
+
+    const maxScore = Math.max(...predictions.map((prediction) => prediction.score));
+    const cache = [...new Set(predictions.map((prediction) => prediction.cache).filter(Boolean))]
+      .join(", ");
+
+    return {
+      isSuspicious: false,
+      score: maxScore,
+      cache,
+      error: null,
+      isOwner,
+    };
   }
 
   const predictions = await Promise.all(handles.map(fetchPrediction));
@@ -217,6 +271,27 @@ function getRowHandles(row) {
     .filter(Boolean);
 
   return [...new Set(handles)];
+}
+
+/**
+ * Описание:
+ * Проверяет, принадлежит ли строка standings владельцу аккаунта.
+ *
+ * Параметры:
+ * - row: HTML-строка standings.
+ * - ownerHandle: handle владельца аккаунта.
+ *
+ * Возвращает:
+ * - boolean: true, если строка содержит handle владельца.
+ */
+function isOwnerRow(row, ownerHandle) {
+  const normalizedOwner = normalizeHandle(ownerHandle);
+
+  if (!normalizedOwner) {
+    return false;
+  }
+
+  return getRowHandles(row).some((handle) => normalizeHandle(handle) === normalizedOwner);
 }
 
 /**
@@ -326,6 +401,37 @@ function formatPureRankLabel(officialRank, pureRank) {
   return `real #${currentRank}`;
 }
 
+function formatOwnerPlaceText(owner) {
+  if (!owner) {
+    return "";
+  }
+
+  const officialRank = owner.officialRank.replace(/^#/, "");
+  const currentRank = String(owner.pureRank);
+
+  if (officialRank && officialRank !== currentRank) {
+    return `your place #${officialRank} -> real #${currentRank}`;
+  }
+
+  return `your real place #${currentRank}`;
+}
+
+function formatOwnerPanelText(stats) {
+  if (stats.owner) {
+    const failedBeforeText = stats.owner.failedBefore
+      ? `, ${stats.owner.failedBefore} model errors before you`
+      : "";
+
+    return ` | ${formatOwnerPlaceText(stats.owner)} (${stats.owner.hiddenBefore} suspicious before you${failedBeforeText})`;
+  }
+
+  if (stats.ownerHandle) {
+    return " | your row is not visible on this page";
+  }
+
+  return "";
+}
+
 /**
  * Описание:
  * Добавляет визуальную метку в строку standings.
@@ -396,8 +502,15 @@ function renderPanel(table, settings, stats) {
   panel.className = "besterds-panel";
 
   const summary = document.createElement("div");
-  const errorsText = stats.failed ? ` · model errors ${stats.failed}` : "";
-  summary.innerHTML = `<strong>Besterds Pure Leaderboard</strong> · hidden ${stats.hidden} of ${stats.total}${errorsText}`;
+  const title = document.createElement("strong");
+  const errorsText = stats.failed ? ` | model errors ${stats.failed}` : "";
+  title.textContent = "Besterds Pure Leaderboard";
+  summary.append(
+    title,
+    document.createTextNode(
+      ` | hidden ${stats.hidden} of ${stats.total}${errorsText}${formatOwnerPanelText(stats)}`
+    )
+  );
 
   const actions = document.createElement("div");
   actions.className = "besterds-panel-actions";
@@ -438,9 +551,11 @@ function renderPanel(table, settings, stats) {
  */
 async function applyTable(table, settings) {
   const rows = [...table.querySelectorAll("tr")].filter(isStandingsParticipantRow);
+  const ownerHandle = getOwnerHandle();
   let pureRank = 1;
   let hidden = 0;
   let failed = 0;
+  let owner = null;
 
   rows.forEach((row) => {
     clearBesterdsRowState(row);
@@ -451,12 +566,14 @@ async function applyTable(table, settings) {
       total: rows.length,
       hidden,
       failed,
+      owner,
+      ownerHandle: null,
     };
   }
 
   const rowPredictions = await mapLimit(rows, 3, async (row) => {
     try {
-      return await getRowPrediction(row);
+      return await getRowPrediction(row, ownerHandle);
     } catch (error) {
       return { isSuspicious: false, score: null, error };
     }
@@ -464,11 +581,14 @@ async function applyTable(table, settings) {
 
   rows.forEach((row, index) => {
     const prediction = rowPredictions[index];
+    const isOwner = Boolean(prediction.isOwner);
+    const officialRank = getOfficialRankText(row);
 
     if (prediction.error) {
       failed += 1;
       const message = prediction.error.message || String(prediction.error);
       appendRowBadge(row, "besterds-mark", "model error", message);
+      pureRank += 1;
       return;
     }
 
@@ -491,7 +611,6 @@ async function applyTable(table, settings) {
       return;
     }
 
-    const officialRank = getOfficialRankText(row);
     const score = formatScore(prediction.score);
     const rankLabel = formatPureRankLabel(officialRank, pureRank);
     const titleParts = [
@@ -502,10 +621,20 @@ async function applyTable(table, settings) {
 
     appendRowBadge(
       row,
-      "besterds-pure-rank",
-      `${rankLabel} ${score}`.trim(),
+      isOwner ? "besterds-pure-rank besterds-owner-rank" : "besterds-pure-rank",
+      `${isOwner ? formatOwnerPlaceText({ officialRank, pureRank }) : rankLabel} ${score}`.trim(),
       titleParts.join(" | ")
     );
+
+    if (isOwner) {
+      owner = {
+        officialRank,
+        pureRank,
+        hiddenBefore: hidden,
+        failedBefore: failed,
+      };
+    }
+
     pureRank += 1;
   });
 
@@ -513,6 +642,8 @@ async function applyTable(table, settings) {
     total: rows.length,
     hidden,
     failed,
+    owner,
+    ownerHandle,
   };
 }
 
@@ -526,7 +657,7 @@ async function applyTable(table, settings) {
  * Возвращает:
  * - Promise<void>: завершение рендера.
  */
-async function applyBesterds() {
+async function runBesterdsPass() {
   if (!isStandingsPage()) {
     return;
   }
@@ -544,7 +675,27 @@ async function applyBesterds() {
   await Promise.all(tables.slice(1).map((table) => applyTable(table, settings)));
 }
 
-chrome.storage.onChanged.addListener(() => {
+async function applyBesterds() {
+  if (applyBesterdsPromise) {
+    return applyBesterdsPromise;
+  }
+
+  applyBesterdsPromise = runBesterdsPass().finally(() => {
+    applyBesterdsPromise = null;
+  });
+
+  return applyBesterdsPromise;
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "sync") {
+    return;
+  }
+
+  if (!changes[STORAGE_KEYS.enabled] && !changes[STORAGE_KEYS.mode]) {
+    return;
+  }
+
   applyBesterds();
 });
 

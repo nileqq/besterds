@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.pyc.*
+src/app/backend/prediction_cache.json
+src/app/backend/prediction_cache.json.tmp
