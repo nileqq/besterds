@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.model import get_data as gd
 from src.model.dataset.prepare_data.ema_feature import EMAFeature
+from src.model.dataset.prepare_data.place_feature import PlaceFeature
 from src.model.dataset.prepare_data.skipped_feature import SkippedFeature
 
 FEATURE_DIR = Path(__file__).with_suffix("")
@@ -19,12 +20,17 @@ cheaters = [
     "--dark--", "-0.50", "777dimasik777", 
     "9kitsune", "9ovem", "9xcuze", "_hemlock_",
     "bhumi_20", "bibek_sah", "bromate04", "bricked_", "bro_gona_rock",
+    "snb", "BVSAKETH", "zilinj", "ItzManu", "tooxpert", "Impredator810", 
+    "woLx10", 
 ]
 
 trusted = [
     "Goddless", "shvepsi_", "Aldk", "Away_in_the_heavens", "tourist",
     "varunkumar_cr7", "CODER__RAM", "kishan_455", "conqueror_of_timosh",
     "34z12000", "adarshsolanki2004", "Erik_piza", "hexp", "frostcat", "khba",
+    "kuro_10206", "_procastinaRukii", "seeforty4040", "Jayadev_S_Gorakavi",
+    "soullless", "chromate00", "cry", "nkamzabek", "lyjiang", "DuyMinh3005",
+    "Christine-", "comed111", "Ekber_Ekber"
 ]
 
 
@@ -48,6 +54,7 @@ def _get_rating_row(client: gd.GetData, is_cheater: bool, period: int = 5) -> di
                 period=period,
                 window_size=5,
             ),
+            **PlaceFeature.get_rank_ratio_log_features(client, contests),
             **SkippedFeature.extract_skipped_contests_features(client, contests),
             "is_cheater": is_cheater,
         }

@@ -10,6 +10,7 @@ FEATURE_COLS = [
     "late_positive_residual_rms",
     "late_max_positive_residual",
     "max_place_surprise_window_rms",
+    "max_rank_ratio_log",
     "skipped_ratio",
     "skipped_contests_count",
 ]

@@ -5,6 +5,7 @@ import json
 
 class GetData:
     BASE_URL = "https://codeforces.com/api"
+    _contest_rating_changes_cache = {}
 
     def __init__(self, handle: str):
         """
@@ -123,6 +124,21 @@ class GetData:
             params["count"] = count
 
         return self._get("contest.standings", params)
+
+    def get_contest_rating_changes(self, contest_id):
+        """
+        Returns rated participants and rating changes for a contest.
+        """
+
+        contest_id = int(contest_id)
+
+        if contest_id not in self._contest_rating_changes_cache:
+            self._contest_rating_changes_cache[contest_id] = self._get(
+                "contest.ratingChanges",
+                {"contestId": contest_id},
+            )
+
+        return self._contest_rating_changes_cache[contest_id]
     
     def get_submissions(self, head=None, tail=None):
         """

@@ -11,6 +11,7 @@ from src.model.model import FEATURE_COLS
 from src.model.model import Model
 from src.model.model import prepare_training_frame
 from src.model.dataset.prepare_data.ema_feature import EMAFeature
+from src.model.dataset.prepare_data.place_feature import PlaceFeature
 from src.model.dataset.prepare_data.skipped_feature import SkippedFeature
 
 
@@ -33,7 +34,6 @@ trusted = [
     "autaons"
 ]
 
-
 def get_rating_features(handle: str, period: int = 5):
     client = gd.GetData(handle)
     contests = client.get_contest_list()
@@ -54,6 +54,7 @@ def get_rating_features(handle: str, period: int = 5):
             period=period,
             window_size=5,
         ),
+        **PlaceFeature.get_rank_ratio_log_features(client, contests),
         **SkippedFeature.extract_skipped_contests_features(client, contests),
     }
 
