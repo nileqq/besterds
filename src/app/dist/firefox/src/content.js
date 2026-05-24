@@ -356,9 +356,7 @@ function findStandingsTables() {
  */
 function clearBesterdsRowState(row) {
   row.classList.remove("besterds-hidden-row", "besterds-highlight-row");
-  row.querySelectorAll(".besterds-pure-rank, .besterds-mark").forEach((node) => {
-    node.remove();
-  });
+  restoreRankCell(row);
 }
 
 /**
@@ -375,30 +373,90 @@ function getRankCell(row) {
   return row.querySelector("td");
 }
 
-function getOfficialRankText(row) {
-  const rankCell = getRankCell(row);
-
-  if (!rankCell) {
-    return "";
-  }
-
+function cloneRankCellWithoutBesterds(rankCell) {
   const clone = rankCell.cloneNode(true);
   clone.querySelectorAll(".besterds-pure-rank, .besterds-mark").forEach((node) => {
     node.remove();
   });
 
-  return clone.textContent.trim().replace(/\s+/g, " ");
+  return clone;
 }
 
-function formatPureRankLabel(officialRank, pureRank) {
-  const normalizedOfficialRank = officialRank.replace(/^#/, "");
-  const currentRank = String(pureRank);
+function readRankCellText(rankCell) {
+  return cloneRankCellWithoutBesterds(rankCell).textContent.trim().replace(/\s+/g, " ");
+}
 
-  if (normalizedOfficialRank && normalizedOfficialRank !== currentRank) {
-    return `#${normalizedOfficialRank} -> real #${currentRank}`;
+function rememberOriginalRankCell(row) {
+  const rankCell = getRankCell(row);
+
+  if (!rankCell) {
+    return null;
   }
 
-  return `real #${currentRank}`;
+  if (rankCell.dataset.besterdsOriginalHtml === undefined) {
+    const cleanClone = cloneRankCellWithoutBesterds(rankCell);
+
+    rankCell.dataset.besterdsOriginalHtml = cleanClone.innerHTML;
+    rankCell.dataset.besterdsOfficialRank = cleanClone.textContent.trim().replace(/\s+/g, " ");
+    rankCell.dataset.besterdsHadOriginalTitle = String(rankCell.hasAttribute("title"));
+    rankCell.dataset.besterdsOriginalTitle = rankCell.getAttribute("title") || "";
+  }
+
+  return rankCell;
+}
+
+function restoreRankCell(row) {
+  const rankCell = getRankCell(row);
+
+  if (!rankCell) {
+    return;
+  }
+
+  if (rankCell.dataset.besterdsOriginalHtml !== undefined) {
+    rankCell.innerHTML = rankCell.dataset.besterdsOriginalHtml;
+
+    if (rankCell.dataset.besterdsHadOriginalTitle === "true") {
+      rankCell.setAttribute("title", rankCell.dataset.besterdsOriginalTitle || "");
+    } else {
+      rankCell.removeAttribute("title");
+    }
+
+    return;
+  }
+
+  rankCell.querySelectorAll(".besterds-pure-rank, .besterds-mark").forEach((node) => {
+    node.remove();
+  });
+}
+
+function getOfficialRankText(row) {
+  const rankCell = rememberOriginalRankCell(row);
+
+  if (!rankCell) {
+    return "";
+  }
+
+  return rankCell.dataset.besterdsOfficialRank || readRankCellText(rankCell);
+}
+
+function formatPureRankCellText(officialRank, pureRank) {
+  return officialRank.trim().startsWith("#") ? `#${pureRank}` : String(pureRank);
+}
+
+function replaceRankCellWithPureRank(row, officialRank, pureRank, title = "") {
+  const rankCell = rememberOriginalRankCell(row);
+
+  if (!rankCell) {
+    return null;
+  }
+
+  rankCell.textContent = formatPureRankCellText(officialRank, pureRank);
+
+  if (title) {
+    rankCell.title = title;
+  }
+
+  return rankCell;
 }
 
 function formatOwnerPlaceText(owner) {
@@ -587,6 +645,12 @@ async function applyTable(table, settings) {
     if (prediction.error) {
       failed += 1;
       const message = prediction.error.message || String(prediction.error);
+      const titleParts = [
+        `Real place without suspicious rows: #${pureRank}`,
+        officialRank ? `Official Codeforces place: #${officialRank.replace(/^#/, "")}` : "",
+      ].filter(Boolean);
+
+      replaceRankCellWithPureRank(row, officialRank, pureRank, titleParts.join(" | "));
       appendRowBadge(row, "besterds-mark", "model error", message);
       pureRank += 1;
       return;
@@ -612,19 +676,23 @@ async function applyTable(table, settings) {
     }
 
     const score = formatScore(prediction.score);
-    const rankLabel = formatPureRankLabel(officialRank, pureRank);
     const titleParts = [
       `Real place without suspicious rows: #${pureRank}`,
       officialRank ? `Official Codeforces place: #${officialRank.replace(/^#/, "")}` : "",
       prediction.cache ? `cache: ${prediction.cache}` : "",
     ].filter(Boolean);
+    const badgeText = [isOwner ? "you" : "", score].filter(Boolean).join(" ");
 
-    appendRowBadge(
-      row,
-      isOwner ? "besterds-pure-rank besterds-owner-rank" : "besterds-pure-rank",
-      `${isOwner ? formatOwnerPlaceText({ officialRank, pureRank }) : rankLabel} ${score}`.trim(),
-      titleParts.join(" | ")
-    );
+    replaceRankCellWithPureRank(row, officialRank, pureRank, titleParts.join(" | "));
+
+    if (badgeText) {
+      appendRowBadge(
+        row,
+        isOwner ? "besterds-pure-rank besterds-owner-rank" : "besterds-pure-rank",
+        badgeText,
+        titleParts.join(" | ")
+      );
+    }
 
     if (isOwner) {
       owner = {
